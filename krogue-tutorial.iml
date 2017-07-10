@@ -9,5 +9,7 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
     <orderEntry type="library" name="ascii-panel-1.2-SNAPSHOT" level="project" />
+    <orderEntry type="library" name="kotlinx-coroutines-swing-0.16" level="project" />
+    <orderEntry type="library" name="kotlinx-coroutines-core-0.16" level="project" />
   </component>
 </module>
