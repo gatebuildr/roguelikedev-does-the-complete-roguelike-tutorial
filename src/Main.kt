@@ -5,9 +5,11 @@ import kotlinx.coroutines.experimental.delay
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.newSingleThreadContext
 import kotlinx.coroutines.experimental.swing.Swing
+import java.awt.Component
 import java.awt.event.KeyEvent
 import java.awt.event.KeyListener
 import java.util.concurrent.TimeUnit
+import javax.swing.JComponent
 import javax.swing.JFrame
 import kotlin.system.exitProcess
 
@@ -77,69 +79,136 @@ class Player : Actor {
     var coords = Coords(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
 }
 
-fun main(args: Array<String>) {
-
-    val asciiPanel = AsciiPanel(SCREEN_WIDTH, SCREEN_HEIGHT)
-
-    val frame = JFrame("Kotlin Roguelike Tutorial")
-    frame.defaultCloseOperation = JFrame.EXIT_ON_CLOSE
-
-    frame.add(asciiPanel)
-
-    val inputChannel = Channel<Input>()
-
-    frame.addKeyListener(object : KeyListenerAdapter() {
-        override fun keyPressed(e: KeyEvent) {
-            println("Key pressed: ${e.keyCode}")
-            val input = when (e.keyCode) {
-                KeyEvent.VK_LEFT -> Input.Left
-                KeyEvent.VK_RIGHT -> Input.Right
-                KeyEvent.VK_UP -> Input.Up
-                KeyEvent.VK_DOWN -> Input.Down
-                KeyEvent.VK_ESCAPE -> Input.Exit
-                else -> null
+interface Terminal {
+    val width:Int
+    val height:Int
+    operator fun set(x:Int, y:Int, char: Char)
+    operator fun set(x0:Int, y0:Int, text: String) {
+        var x = x0
+        var y = y0
+        for(c in text) {
+            this[x,y]=c
+            x++
+            if(x >= width) {
+                x = 0
+                y++
             }
-            if (input != null) {
-                launch(Swing) {
-                    inputChannel.send(input)
-                }
-            }
-        }
-    })
-
-    val playerIntelligenceChannel = Channel<Action<Player>>()
-
-    val inputReadCoroutine = launch(newSingleThreadContext("Input processing")) {
-        inputChannel.consumeEach { input ->
-            println("Input received: $input")
-            when (input) {
-                Input.Exit -> exitProcess(0)
-                in MoveKeys -> playerIntelligenceChannel.send(Move(MoveKeys[input]!!))
-                else -> {
-                }
-            }
-            //pretend input takes a while to process
-            delay(500, TimeUnit.MILLISECONDS)
         }
     }
-    val player = Player()
+    fun clear()
+    fun flush()
+}
 
-    fun refreshScreen() {
-        asciiPanel.clear()
-        asciiPanel.write('@', player.coords.x, SCREEN_HEIGHT-player.coords.y)
+class AsciiTerminal(val asciiPanel: AsciiPanel): Terminal {
+    override fun flush() {
         asciiPanel.repaint()
     }
 
-    refreshScreen()
+    override val width: Int
+        get() = asciiPanel.charWidth
 
-    val gameLoopCoroutine = launch(newSingleThreadContext("Game Loop")) {
-        playerIntelligenceChannel.consumeEach { action ->
-            println("Player move: $action")
-            action.perform(player)
-            refreshScreen()
-        }
+    override val height: Int
+        get() = asciiPanel.charHeight
+
+    override fun set(x: Int, y: Int, char: Char) {
+        asciiPanel.write(char, x, y)
     }
 
-    frame.pack()
-    frame.isVisible = true
+    override fun clear() {
+        asciiPanel.clear()
+    }
+}
+
+interface InputSource {
+    val inputChannel: Channel<Input>
+}
+
+interface GameDisplay {
+    val terminal:Terminal
+}
+
+class AsciiTerminalDisplay(val asciiPanel: AsciiPanel): GameDisplay, InputSource {
+    override val inputChannel = Channel<Input>()
+    override val terminal = AsciiTerminal(asciiPanel)
+
+    val frame = JFrame("Kotlin Roguelike Tutorial").apply {
+        defaultCloseOperation = JFrame.EXIT_ON_CLOSE
+        addKeyListener(object : KeyListenerAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                println("Key pressed: ${e.keyCode}")
+                val input = when (e.keyCode) {
+                    KeyEvent.VK_LEFT -> Input.Left
+                    KeyEvent.VK_RIGHT -> Input.Right
+                    KeyEvent.VK_UP -> Input.Up
+                    KeyEvent.VK_DOWN -> Input.Down
+                    KeyEvent.VK_ESCAPE -> Input.Exit
+                    else -> null
+                }
+                if (input != null) {
+                    launch(Swing) {
+                        inputChannel.send(input)
+                    }
+                }
+            }
+        })
+
+        add(asciiPanel)
+        pack()
+        isVisible = true
+    }
+}
+
+fun main(args: Array<String>) {
+
+    val swingIO = AsciiTerminalDisplay(AsciiPanel(SCREEN_WIDTH, SCREEN_HEIGHT))
+
+    val mainPanel = swingIO.terminal
+
+    val inputChannel = swingIO.inputChannel
+
+    val game = Game(mainPanel, inputChannel)
+    game.start()
+
+    game(mainPanel, inputChannel)
+}
+
+class Game(val mainPanel: Terminal, val inputChannel: Channel<Input>) {
+    val playerIntelligenceChannel = Channel<Action<Player>>()
+    fun start() {
+
+        val inputReadCoroutine = launch(newSingleThreadContext("Input processing")) {
+            inputChannel.consumeEach { input ->
+                println("Input received: $input")
+                when (input) {
+                    Input.Exit -> exitProcess(0)
+                    in MoveKeys -> playerIntelligenceChannel.send(Move(MoveKeys[input]!!))
+                    else -> {
+                    }
+                }
+                //pretend input takes a while to process
+                delay(500, TimeUnit.MILLISECONDS)
+            }
+        }
+        val player = Player()
+
+        fun updateMapDisplay() {
+            mainPanel.clear()
+            mainPanel[player.coords.x, SCREEN_HEIGHT - player.coords.y] = '@'
+            mainPanel.flush()
+        }
+
+        updateMapDisplay()
+
+        val gameLoopCoroutine = launch(newSingleThreadContext("Game Loop")) {
+            playerIntelligenceChannel.consumeEach { action ->
+                println("Player move: $action")
+                action.perform(player)
+                updateMapDisplay()
+            }
+        }
+    }
+}
+
+private fun game(mainPanel: Terminal, inputChannel: Channel<Input>) {
+
 }
